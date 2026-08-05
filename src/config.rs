@@ -43,9 +43,9 @@ impl Config {
         }
 
         let cloudflare_api_token = if queues.is_empty() {
-            env::var("CLOUDFLARE_API_TOKEN").unwrap_or_default()
+            env::var("CLOUDFLARE_TOKEN").unwrap_or_default()
         } else {
-            required("CLOUDFLARE_API_TOKEN")?
+            required("CLOUDFLARE_TOKEN")?
         };
 
         Ok(Self {
