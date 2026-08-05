@@ -9,8 +9,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: brojyf/rusti2
   COOLIFY_API_URL: https://coolify.co-gate.com/api/v1
-  # UUID of the rusti2 application in Coolify; fill in after creating it.
-  COOLIFY_APP_UUID: ""
+  COOLIFY_APP_UUID: ynp3r9wnf8hw8uiir43vk1pv
 
 jobs:
   test:
