@@ -15,6 +15,8 @@ pub struct Config {
     pub cloudflare_api_token: String,
     /// Logical queue name -> Cloudflare queue ID.
     pub queues: HashMap<String, String>,
+    /// Whether avatar moderation is enforced. "on" or "off".
+    pub moderation_enabled: bool,
 }
 
 impl Config {
@@ -48,6 +50,12 @@ impl Config {
             required("CLOUDFLARE_TOKEN")?
         };
 
+        let moderation_enabled = match required("MODERATION")?.to_lowercase().as_str() {
+            "on" => true,
+            "off" => false,
+            other => return Err(format!("MODERATION must be 'on' or 'off', got {other:?}")),
+        };
+
         Ok(Self {
             bind_addr: env::var("RUSTI2_BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3002".into()),
             cloudflare_account_id: required("CLOUDFLARE_ACCOUNT_ID")?,
@@ -56,6 +64,7 @@ impl Config {
             allowed_buckets,
             cloudflare_api_token,
             queues,
+            moderation_enabled,
         })
     }
 

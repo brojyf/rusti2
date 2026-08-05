@@ -51,6 +51,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.queues.clone(),
     );
 
+    let http = reqwest::Client::new();
+
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
         .set_serving::<ObjectStorageServer<ObjectStorageService>>()
@@ -59,12 +61,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .set_serving::<QueuesServer<QueuesService>>()
         .await;
 
-    info!(%addr, buckets = ?config.allowed_buckets, queues = ?config.queues.keys(), "rusti2 listening");
+    info!(%addr, buckets = ?config.allowed_buckets, moderation = config.moderation_enabled, queues = ?config.queues.keys(), "rusti2 listening");
     Server::builder()
         .add_service(health_service)
         .add_service(ObjectStorageServer::new(ObjectStorageService::new(
             s3,
             config.clone(),
+            http,
+            config.cloudflare_account_id.clone(),
+            config.cloudflare_api_token.clone(),
+            config.queues.clone(),
         )))
         .add_service(QueuesServer::new(queues_service))
         .serve(addr)
