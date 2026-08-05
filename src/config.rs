@@ -49,7 +49,7 @@ impl Config {
         };
 
         Ok(Self {
-            bind_addr: env::var("RUSTI2_BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:50051".into()),
+            bind_addr: env::var("RUSTI2_BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3002".into()),
             cloudflare_account_id: required("CLOUDFLARE_ACCOUNT_ID")?,
             r2_access_key_id: required("R2_ACCESS_KEY_ID")?,
             r2_secret_access_key: required("R2_SECRET_ACCESS_KEY")?,
