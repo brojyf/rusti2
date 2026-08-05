@@ -118,9 +118,12 @@ impl Queues for QueuesService {
         let req = request.into_inner();
         let queue_id = self.queue_id(&req.queue)?;
 
+        // The HTTP publish API only accepts "text" and "json" content
+        // types, so arbitrary bytes travel as base64 inside a text
+        // message; pull_messages reverses this.
         let payload = serde_json::json!({
             "body": BASE64.encode(&req.body),
-            "content_type": "base64",
+            "content_type": "text",
             "delay_seconds": req.delay_seconds,
         });
         self.call(
@@ -168,17 +171,19 @@ impl Queues for QueuesService {
             .messages
             .into_iter()
             .map(|m| {
+                // Messages published by rusti2 are base64 text; fall
+                // back to the raw string for foreign producers.
                 let body = BASE64
                     .decode(&m.body)
-                    .map_err(|e| internal("pull_messages", e))?;
-                Ok(QueueMessage {
+                    .unwrap_or_else(|_| m.body.into_bytes());
+                QueueMessage {
                     id: m.id,
                     lease_id: m.lease_id,
                     body,
                     attempts: m.attempts.max(1),
-                })
+                }
             })
-            .collect::<Result<Vec<_>, Status>>()?;
+            .collect();
 
         Ok(Response::new(PullMessagesResponse { messages }))
     }
