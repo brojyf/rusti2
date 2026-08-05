@@ -47,7 +47,14 @@ impl ObjectStorageService {
     ) -> Self {
         let cf_queues_api_base =
             format!("https://api.cloudflare.com/client/v4/accounts/{cf_account_id}/queues");
-        Self { s3, config, http, cf_queues_api_base, cf_api_token, queues }
+        Self {
+            s3,
+            config,
+            http,
+            cf_queues_api_base,
+            cf_api_token,
+            queues,
+        }
     }
 
     /// Publish a moderation job for the uploaded object.
@@ -99,6 +106,7 @@ impl ObjectStorageService {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     fn check_bucket(&self, bucket: &str) -> Result<(), Status> {
         if bucket.is_empty() {
             return Err(Status::invalid_argument("bucket is required"));
@@ -112,6 +120,7 @@ impl ObjectStorageService {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn check_key(key: &str) -> Result<(), Status> {
     if key.is_empty() {
         return Err(Status::invalid_argument("key is required"));

@@ -37,6 +37,7 @@ impl QueuesService {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     fn queue_id(&self, name: &str) -> Result<&str, Status> {
         if name.is_empty() {
             return Err(Status::invalid_argument("queue is required"));
