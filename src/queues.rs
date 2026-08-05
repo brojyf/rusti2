@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use tonic::{Request, Response, Status};
 use tracing::error;
@@ -31,9 +31,7 @@ impl QueuesService {
     pub fn new(account_id: &str, api_token: String, queues: HashMap<String, String>) -> Self {
         Self {
             http: reqwest::Client::new(),
-            api_base: format!(
-                "https://api.cloudflare.com/client/v4/accounts/{account_id}/queues"
-            ),
+            api_base: format!("https://api.cloudflare.com/client/v4/accounts/{account_id}/queues"),
             api_token,
             queues,
         }
@@ -43,12 +41,9 @@ impl QueuesService {
         if name.is_empty() {
             return Err(Status::invalid_argument("queue is required"));
         }
-        self.queues
-            .get(name)
-            .map(String::as_str)
-            .ok_or_else(|| {
-                Status::permission_denied(format!("queue {name:?} is not served by this instance"))
-            })
+        self.queues.get(name).map(String::as_str).ok_or_else(|| {
+            Status::permission_denied(format!("queue {name:?} is not served by this instance"))
+        })
     }
 
     async fn call(
