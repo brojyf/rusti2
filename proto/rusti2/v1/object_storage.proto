@@ -1,0 +1,158 @@
+syntax = "proto3";
+
+package rusti2.v1;
+
+option go_package = "github.com/brojyf/rusti2/gen/go/rusti2/v1;rusti2v1";
+
+// ObjectStorage wraps Cloudflare R2 for internal services.
+//
+// Buckets are referred to by their R2 bucket name. rusti2 only serves
+// buckets listed in its RUSTI2_ALLOWED_BUCKETS configuration; requests
+// for any other bucket fail with PERMISSION_DENIED.
+//
+// Missing objects surface as gRPC NOT_FOUND, except DeleteObject which
+// is idempotent.
+service ObjectStorage {
+  // Returns a time-limited URL the caller can hand to an end client for
+  // a direct HTTP PUT to R2. Content type is baked into the signature.
+  rpc PresignPutObject(PresignPutObjectRequest) returns (PresignPutObjectResponse);
+
+  // Returns object metadata without fetching the body.
+  rpc StatObject(StatObjectRequest) returns (StatObjectResponse);
+
+  // Streams the object body in chunks.
+  rpc DownloadObject(DownloadObjectRequest) returns (stream DownloadObjectChunk);
+
+  // Uploads an object. The first message must carry metadata; subsequent
+  // messages carry body chunks.
+  rpc UploadObject(stream UploadObjectRequest) returns (UploadObjectResponse);
+
+  // Deletes an object. Deleting a missing object succeeds.
+  rpc DeleteObject(DeleteObjectRequest) returns (DeleteObjectResponse);
+}
+
+message PresignPutObjectRequest {
+  string bucket = 1;
+  string key = 2;
+  // Required. The signed URL only accepts uploads with this Content-Type.
+  string content_type = 3;
+  // Seconds until the URL expires. Server clamps to [60, 3600]; 0 means
+  // the server default (900).
+  uint32 expires_in_seconds = 4;
+}
+
+message PresignPutObjectResponse {
+  string url = 1;
+  // Unix seconds at which the URL stops working.
+  int64 expires_at = 2;
+}
+
+message StatObjectRequest {
+  string bucket = 1;
+  string key = 2;
+}
+
+message StatObjectResponse {
+  int64 size_bytes = 1;
+  string content_type = 2;
+  string etag = 3;
+}
+
+message DownloadObjectRequest {
+  string bucket = 1;
+  string key = 2;
+}
+
+message DownloadObjectChunk {
+  // At most 1 MiB per chunk.
+  bytes body = 1;
+}
+
+message UploadObjectRequest {
+  message Metadata {
+    string bucket = 1;
+    string key = 2;
+    string content_type = 3;
+  }
+  oneof payload {
+    Metadata metadata = 1;
+    // At most 1 MiB per chunk.
+    bytes body = 2;
+  }
+}
+
+message UploadObjectResponse {
+  string etag = 1;
+  int64 size_bytes = 2;
+}
+
+message DeleteObjectRequest {
+  string bucket = 1;
+  string key = 2;
+}
+
+message DeleteObjectResponse {}
+
+// Queues proxies Cloudflare Queues for internal services so Cloudflare
+// API credentials never leave rusti2.
+//
+// Queues are referred to by logical name; rusti2 maps names to queue IDs
+// via its RUSTI2_QUEUES configuration. Unknown names fail with
+// PERMISSION_DENIED.
+service Queues {
+  // Publishes one message.
+  rpc PublishMessage(PublishMessageRequest) returns (PublishMessageResponse);
+
+  // Leases up to batch_size messages. Leased messages are invisible to
+  // other consumers until acked, retried, or the visibility timeout ends.
+  rpc PullMessages(PullMessagesRequest) returns (PullMessagesResponse);
+
+  // Acks successfully handled messages and schedules retries for failed
+  // ones in a single call.
+  rpc AckMessages(AckMessagesRequest) returns (AckMessagesResponse);
+}
+
+message PublishMessageRequest {
+  string queue = 1;
+  // Opaque payload, delivered verbatim. Callers encode their own JSON.
+  bytes body = 2;
+  // Seconds to delay first delivery; 0 delivers immediately.
+  uint32 delay_seconds = 3;
+}
+
+message PublishMessageResponse {}
+
+message PullMessagesRequest {
+  string queue = 1;
+  // Server clamps to [1, 100]; 0 means the server default (10).
+  uint32 batch_size = 2;
+  // Milliseconds messages stay leased. Server clamps to
+  // [1000, 43200000]; 0 means the server default (300000).
+  uint32 visibility_timeout_ms = 3;
+}
+
+message QueueMessage {
+  string id = 1;
+  // Lease handle passed back in AckMessagesRequest.
+  string lease_id = 2;
+  bytes body = 3;
+  // Delivery attempts so far, starting at 1.
+  uint32 attempts = 4;
+}
+
+message PullMessagesResponse {
+  repeated QueueMessage messages = 1;
+}
+
+message AckMessagesRequest {
+  message Retry {
+    string lease_id = 1;
+    // Seconds before the message becomes visible again.
+    uint32 delay_seconds = 2;
+  }
+  string queue = 1;
+  repeated string ack_lease_ids = 2;
+  repeated Retry retries = 3;
+}
+
+message AckMessagesResponse {}
