@@ -23,7 +23,7 @@ ENV RUSTI2_BIND_ADDR=0.0.0.0:3002
 EXPOSE 3002
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD curl --fail --silent http://127.0.0.1:3002/api/health || exit 1
+    CMD curl --fail --silent --http2-prior-knowledge http://127.0.0.1:3002/api/health || exit 1
 
 USER 10001:10001
 
