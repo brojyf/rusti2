@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::env;
 
 #[derive(Debug, Clone)]
@@ -10,13 +10,6 @@ pub struct Config {
     /// Buckets this instance is allowed to serve. Requests naming any
     /// other bucket are rejected with PERMISSION_DENIED.
     pub allowed_buckets: HashSet<String>,
-    /// Cloudflare API token with Queues read/write; required when any
-    /// queue is configured.
-    pub cloudflare_api_token: String,
-    /// Logical queue name -> Cloudflare queue ID.
-    pub queues: HashMap<String, String>,
-    /// Whether avatar moderation is enforced. "on" or "off".
-    pub moderation_enabled: bool,
 }
 
 impl Config {
@@ -30,41 +23,12 @@ impl Config {
             return Err("RUSTI2_ALLOWED_BUCKETS must list at least one bucket".into());
         }
 
-        // RUSTI2_QUEUES maps logical names to queue IDs:
-        //   avatar-moderation=<queue-id>,other-queue=<queue-id>
-        let mut queues = HashMap::new();
-        for entry in env::var("RUSTI2_QUEUES").unwrap_or_default().split(',') {
-            let entry = entry.trim();
-            if entry.is_empty() {
-                continue;
-            }
-            let (name, id) = entry
-                .split_once('=')
-                .ok_or_else(|| format!("RUSTI2_QUEUES entry {entry:?} must be name=queue-id"))?;
-            queues.insert(name.trim().to_string(), id.trim().to_string());
-        }
-
-        let cloudflare_api_token = if queues.is_empty() {
-            env::var("CLOUDFLARE_TOKEN").unwrap_or_default()
-        } else {
-            required("CLOUDFLARE_TOKEN")?
-        };
-
-        let moderation_enabled = match required("MODERATION")?.to_lowercase().as_str() {
-            "on" => true,
-            "off" => false,
-            other => return Err(format!("MODERATION must be 'on' or 'off', got {other:?}")),
-        };
-
         Ok(Self {
             bind_addr: env::var("RUSTI2_BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3002".into()),
             cloudflare_account_id: required("CLOUDFLARE_ACCOUNT_ID")?,
             r2_access_key_id: required("R2_ACCESS_KEY_ID")?,
             r2_secret_access_key: required("R2_SECRET_ACCESS_KEY")?,
             allowed_buckets,
-            cloudflare_api_token,
-            queues,
-            moderation_enabled,
         })
     }
 

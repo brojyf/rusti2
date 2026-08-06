@@ -1,13 +1,10 @@
-use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::primitives::ByteStream;
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine as _;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use crate::config::Config;
 use crate::pb::object_storage_server::ObjectStorage;
@@ -28,85 +25,13 @@ const MAX_PRESIGN_SECS: u64 = 3600;
 pub struct ObjectStorageService {
     s3: aws_sdk_s3::Client,
     config: Config,
-    http: reqwest::Client,
-    /// Cloudflare Queues API base URL.
-    cf_queues_api_base: String,
-    cf_api_token: String,
-    /// Logical queue name -> Cloudflare queue ID.
-    queues: HashMap<String, String>,
 }
 
 impl ObjectStorageService {
-    pub fn new(
-        s3: aws_sdk_s3::Client,
-        config: Config,
-        http: reqwest::Client,
-        cf_account_id: String,
-        cf_api_token: String,
-        queues: HashMap<String, String>,
-    ) -> Self {
-        let cf_queues_api_base =
-            format!("https://api.cloudflare.com/client/v4/accounts/{cf_account_id}/queues");
-        Self {
-            s3,
-            config,
-            http,
-            cf_queues_api_base,
-            cf_api_token,
-            queues,
-        }
+    pub fn new(s3: aws_sdk_s3::Client, config: Config) -> Self {
+        Self { s3, config }
     }
 
-    /// Publish a moderation job for the uploaded object.
-    async fn publish_moderation(
-        &self,
-        bucket: &str,
-        key: &str,
-        content_type: &str,
-        size_bytes: i64,
-    ) {
-        let queue_id = match self.queues.get("avatar-moderation") {
-            Some(id) => id,
-            None => {
-                warn!("avatar-moderation queue not configured, skipping moderation publish");
-                return;
-            }
-        };
-
-        let payload = serde_json::json!({
-            "bucket": bucket,
-            "key": key,
-            "content_type": content_type,
-            "size_bytes": size_bytes,
-        });
-
-        let body = serde_json::json!({
-            "body": BASE64.encode(serde_json::to_string(&payload).unwrap_or_default()),
-            "content_type": "text",
-        });
-
-        let url = format!("{}/{queue_id}/messages", self.cf_queues_api_base);
-        match self
-            .http
-            .post(&url)
-            .bearer_auth(&self.cf_api_token)
-            .json(&body)
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => {
-                info!(bucket, key, "moderation job published");
-            }
-            Ok(resp) => {
-                warn!(bucket, key, status = %resp.status(), "moderation publish returned non-ok status");
-            }
-            Err(e) => {
-                warn!(bucket, key, error = %e, "moderation publish failed");
-            }
-        }
-    }
-
-    #[allow(clippy::result_large_err)]
     fn check_bucket(&self, bucket: &str) -> Result<(), Status> {
         if bucket.is_empty() {
             return Err(Status::invalid_argument("bucket is required"));
@@ -120,7 +45,6 @@ impl ObjectStorageService {
     }
 }
 
-#[allow(clippy::result_large_err)]
 fn check_key(key: &str) -> Result<(), Status> {
     if key.is_empty() {
         return Err(Status::invalid_argument("key is required"));
@@ -312,16 +236,6 @@ impl ObjectStorage for ObjectStorageService {
             .map_err(|e| internal("upload_object", e))?;
 
         info!(bucket = %metadata.bucket, key = %metadata.key, size_bytes, "object uploaded");
-
-        if self.config.moderation_enabled {
-            self.publish_moderation(
-                &metadata.bucket,
-                &metadata.key,
-                &metadata.content_type,
-                size_bytes,
-            )
-            .await;
-        }
 
         Ok(Response::new(UploadObjectResponse {
             etag: put.e_tag().unwrap_or_default().to_string(),
