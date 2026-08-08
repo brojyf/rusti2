@@ -6,9 +6,15 @@ option go_package = "github.com/brojyf/rusti2/gen/go/rusti2/v1;rusti2v1";
 
 // ObjectStorage wraps Cloudflare R2 for internal services.
 //
-// Buckets are referred to by their R2 bucket name. rusti2 only serves
-// buckets listed in its RUSTI2_ALLOWED_BUCKETS configuration; requests
-// for any other bucket fail with PERMISSION_DENIED.
+// Every RPC requires a service token in the `authorization: Bearer …`
+// metadata header. The token identifies the calling service; rusti2's
+// RUSTI2_CALLERS policy says which methods that service may use and which
+// bucket and key prefixes it may use them on. A request outside that grant
+// fails with PERMISSION_DENIED, an unrecognized or absent token with
+// UNAUTHENTICATED. There is no ambient access: a caller reaching rusti2 over
+// the network is not thereby allowed to touch another service's objects.
+//
+// Buckets are referred to by their R2 bucket name.
 //
 // Missing objects surface as gRPC NOT_FOUND, except DeleteObject which
 // is idempotent.

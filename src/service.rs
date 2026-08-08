@@ -4,9 +4,9 @@ use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::primitives::ByteStream;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
-use crate::config::Config;
+use crate::auth::caller_of;
 use crate::pb::object_storage_server::ObjectStorage;
 use crate::pb::upload_object_request::Payload;
 use crate::pb::{
@@ -14,6 +14,7 @@ use crate::pb::{
     PresignPutObjectRequest, PresignPutObjectResponse, StatObjectRequest, StatObjectResponse,
     UploadObjectRequest, UploadObjectResponse,
 };
+use crate::policy::{Caller, Method};
 
 const CHUNK_BYTES: usize = 1024 * 1024;
 /// Uploads are buffered in memory before the R2 put; refuse anything larger.
@@ -24,30 +25,42 @@ const MAX_PRESIGN_SECS: u64 = 3600;
 
 pub struct ObjectStorageService {
     s3: aws_sdk_s3::Client,
-    config: Config,
 }
 
 impl ObjectStorageService {
-    pub fn new(s3: aws_sdk_s3::Client, config: Config) -> Self {
-        Self { s3, config }
-    }
-
-    fn check_bucket(&self, bucket: &str) -> Result<(), Status> {
-        if bucket.is_empty() {
-            return Err(Status::invalid_argument("bucket is required"));
-        }
-        if !self.config.allowed_buckets.contains(bucket) {
-            return Err(Status::permission_denied(format!(
-                "bucket {bucket:?} is not served by this instance"
-            )));
-        }
-        Ok(())
+    pub fn new(s3: aws_sdk_s3::Client) -> Self {
+        Self { s3 }
     }
 }
 
-fn check_key(key: &str) -> Result<(), Status> {
+/// Validates the target and checks it against what `caller` was granted.
+///
+/// Every handler runs this before touching R2, and it is the only place that
+/// decides whether an operation is allowed. Splitting the shape checks out
+/// would let a handler validate without authorizing, so both live here and a
+/// handler cannot do one without the other.
+fn authorize(caller: &Caller, method: Method, bucket: &str, key: &str) -> Result<(), Status> {
+    if bucket.is_empty() {
+        return Err(Status::invalid_argument("bucket is required"));
+    }
     if key.is_empty() {
         return Err(Status::invalid_argument("key is required"));
+    }
+
+    if !caller.allows(method, bucket, key) {
+        // Logged with the caller so an unexpected denial is traceable to a
+        // policy line; the client is told only that it was denied, because the
+        // shape of someone else's policy is not its business.
+        warn!(
+            caller = %caller.name,
+            %method,
+            %bucket,
+            %key,
+            "denied object storage request"
+        );
+        return Err(Status::permission_denied(format!(
+            "caller is not allowed to {method} {bucket}/{key}"
+        )));
     }
     Ok(())
 }
@@ -63,9 +76,9 @@ impl ObjectStorage for ObjectStorageService {
         &self,
         request: Request<PresignPutObjectRequest>,
     ) -> Result<Response<PresignPutObjectResponse>, Status> {
+        let caller = caller_of(&request)?;
         let req = request.into_inner();
-        self.check_bucket(&req.bucket)?;
-        check_key(&req.key)?;
+        authorize(&caller, Method::PresignPut, &req.bucket, &req.key)?;
         if req.content_type.is_empty() {
             return Err(Status::invalid_argument("content_type is required"));
         }
@@ -103,9 +116,9 @@ impl ObjectStorage for ObjectStorageService {
         &self,
         request: Request<StatObjectRequest>,
     ) -> Result<Response<StatObjectResponse>, Status> {
+        let caller = caller_of(&request)?;
         let req = request.into_inner();
-        self.check_bucket(&req.bucket)?;
-        check_key(&req.key)?;
+        authorize(&caller, Method::Stat, &req.bucket, &req.key)?;
 
         let head = self
             .s3
@@ -134,9 +147,9 @@ impl ObjectStorage for ObjectStorageService {
         &self,
         request: Request<DownloadObjectRequest>,
     ) -> Result<Response<Self::DownloadObjectStream>, Status> {
+        let caller = caller_of(&request)?;
         let req = request.into_inner();
-        self.check_bucket(&req.bucket)?;
-        check_key(&req.key)?;
+        authorize(&caller, Method::Download, &req.bucket, &req.key)?;
 
         let object = self
             .s3
@@ -193,6 +206,9 @@ impl ObjectStorage for ObjectStorageService {
         &self,
         request: Request<Streaming<UploadObjectRequest>>,
     ) -> Result<Response<UploadObjectResponse>, Status> {
+        // Read the caller before the stream is consumed: `into_inner` takes the
+        // request, extensions and all.
+        let caller = caller_of(&request)?;
         let mut stream = request.into_inner();
 
         let metadata = match stream.message().await? {
@@ -205,8 +221,9 @@ impl ObjectStorage for ObjectStorageService {
                 ))
             }
         };
-        self.check_bucket(&metadata.bucket)?;
-        check_key(&metadata.key)?;
+        // Authorize before reading a single body chunk, so a caller with no
+        // rights to the target cannot make the server buffer 64 MiB first.
+        authorize(&caller, Method::Upload, &metadata.bucket, &metadata.key)?;
 
         let mut buf: Vec<u8> = Vec::new();
         while let Some(msg) = stream.message().await? {
@@ -247,9 +264,9 @@ impl ObjectStorage for ObjectStorageService {
         &self,
         request: Request<DeleteObjectRequest>,
     ) -> Result<Response<DeleteObjectResponse>, Status> {
+        let caller = caller_of(&request)?;
         let req = request.into_inner();
-        self.check_bucket(&req.bucket)?;
-        check_key(&req.key)?;
+        authorize(&caller, Method::Delete, &req.bucket, &req.key)?;
 
         // S3/R2 DeleteObject succeeds even when the key does not exist,
         // which matches the idempotent contract in the proto.

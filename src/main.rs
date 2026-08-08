@@ -1,10 +1,3 @@
-mod config;
-mod service;
-
-pub mod pb {
-    tonic::include_proto!("rusti2.v1");
-}
-
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -13,13 +6,15 @@ use aws_config::BehaviorVersion;
 use aws_credential_types::Credentials;
 use aws_sdk_s3::config::Region;
 use http::{Request, Response};
+use tonic::service::interceptor::InterceptedService;
 use tonic::transport::Server;
 use tower::{Layer, Service};
 use tracing::info;
 
-use crate::config::Config;
-use crate::pb::object_storage_server::ObjectStorageServer;
-use crate::service::ObjectStorageService;
+use rusti2::auth::ServiceTokenAuth;
+use rusti2::config::Config;
+use rusti2::pb::object_storage_server::ObjectStorageServer;
+use rusti2::service::ObjectStorageService;
 
 /// A [`Layer`] that intercepts `GET /api/health` and returns 200 OK.
 #[derive(Clone)]
@@ -102,15 +97,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .set_serving::<ObjectStorageServer<ObjectStorageService>>()
         .await;
 
-    info!(%addr, buckets = ?config.allowed_buckets, "rusti2 listening");
+    info!(%addr, callers = ?config.policy.caller_names(), "rusti2 listening");
 
+    // The health services stay unauthenticated: container healthchecks and
+    // load balancers have no service token, and neither endpoint reveals
+    // anything about the buckets. Only ObjectStorage sits behind the
+    // interceptor.
     Server::builder()
         .layer(HealthLayer)
         .add_service(health_service)
-        .add_service(ObjectStorageServer::new(ObjectStorageService::new(
-            s3,
-            config.clone(),
-        )))
+        .add_service(InterceptedService::new(
+            ObjectStorageServer::new(ObjectStorageService::new(s3)),
+            ServiceTokenAuth::new(config.policy.clone()),
+        ))
         .serve(addr.parse()?)
         .await?;
 
