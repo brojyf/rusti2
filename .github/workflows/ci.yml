@@ -6,6 +6,7 @@ on:
   pull_request:
 
 env:
+  CARGO_TERM_COLOR: always
   REGISTRY: ghcr.io
   IMAGE_NAME: brojyf/rusti2
   COOLIFY_API_URL: https://coolify.co-gate.com/api/v1
@@ -14,26 +15,51 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
+      - name: Configure private proto access
+        env:
+          PROTO_REPO_SSH_KEY: ${{ secrets.PROTO_REPO_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PROTO_REPO_SSH_KEY" ]; then
+            echo "::error::PROTO_REPO_SSH_KEY is not configured"
+            exit 1
+          fi
+          key_path="$RUNNER_TEMP/cogate-cotab-proto-key"
+          known_hosts_path="$RUNNER_TEMP/cogate-cotab-proto-known-hosts"
+          printf '%s\n' "$PROTO_REPO_SSH_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          printf '%s\n' '[ssh.github.com]:443 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > "$known_hosts_path"
+          test "$(ssh-keygen -lf "$key_path" | awk '{print $2}')" = "SHA256:fXq4gIVo92PCIZrebRmbV7vhhQ7XPQh8a6IXLKoecQs"
+          git config --global core.sshCommand "ssh -i $key_path -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_path"
+          git config --global url."ssh://git@ssh.github.com:443/".insteadOf "https://github.com/"
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends protobuf-compiler
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      # Caches ~/.cargo registry and ./target keyed on the lockfile.
       - uses: Swatinem/rust-cache@v2
       - name: Check formatting
-        run: cargo fmt --check
+        run: cargo fmt --all -- --check
+      # -D warnings, so a lint that everybody agrees with does not accumulate
+      # into background noise nobody reads.
       - name: Clippy
-        run: cargo clippy --all-targets
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Build
+        run: cargo build --all-targets
+      # --all-targets picks up tests/policy_fuzz.rs, the proptest suite.
       - name: Test
-        run: cargo test
+        run: cargo test --all-targets
 
   build-and-deploy:
     name: Build image and deploy
-    needs: test
+    needs: [test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: production
     permissions:
       contents: read
@@ -60,6 +86,8 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          secrets: |
+            proto_ssh_key=${{ secrets.PROTO_REPO_SSH_KEY }}
       - name: Trigger Coolify deployment
         env:
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
