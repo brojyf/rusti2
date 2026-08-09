@@ -83,10 +83,15 @@ proptest! {
         assert!(!scope_covers(&scope, &other_bucket, &key));
 
         // Same bucket but key without the prefix must not be covered
-        // (unless prefix is empty).
+        // (unless prefix is empty). Prepending "x" only guarantees a
+        // non-matching key when the result doesn't coincidentally start
+        // with `prefix` again (e.g. prefix "x" turns "x{prefix}" back
+        // into a prefix match), so skip when that guarantee doesn't hold.
         if !prefix.is_empty() && !suffix.is_empty() {
             let foreign_key = format!("x{prefix}{suffix}");
-            assert!(!scope_covers(&scope, &bucket, &foreign_key));
+            if !foreign_key.starts_with(&prefix) {
+                assert!(!scope_covers(&scope, &bucket, &foreign_key));
+            }
         }
     }
 }
