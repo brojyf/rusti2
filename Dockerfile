@@ -7,6 +7,7 @@ RUN apt-get update \
 
 WORKDIR /app
 
+COPY .cargo ./.cargo
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 
