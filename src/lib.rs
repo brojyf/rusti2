@@ -4,5 +4,5 @@ pub mod policy;
 pub mod service;
 
 pub mod pb {
-    tonic::include_proto!("rusti2.v1");
+    pub use cogate_cotab_proto::rusti2::v1::*;
 }

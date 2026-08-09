@@ -39,6 +39,9 @@ impl ObjectStorageService {
 /// decides whether an operation is allowed. Splitting the shape checks out
 /// would let a handler validate without authorizing, so both live here and a
 /// handler cannot do one without the other.
+// Returning tonic::Status directly keeps authorization failures on the normal
+// RPC error path; boxing it would add indirection to every handler.
+#[allow(clippy::result_large_err)]
 fn authorize(caller: &Caller, method: Method, bucket: &str, key: &str) -> Result<(), Status> {
     if bucket.is_empty() {
         return Err(Status::invalid_argument("bucket is required"));

@@ -40,6 +40,9 @@ impl tonic::service::Interceptor for ServiceTokenAuth {
     }
 }
 
+// Tonic requires Status at the RPC boundary; boxing it would only move the
+// allocation into every caller and make these transport helpers harder to use.
+#[allow(clippy::result_large_err)]
 fn authenticate<T>(policy: &Policy, request: &Request<T>) -> Result<Arc<Caller>, Status> {
     let header = request
         .metadata()
@@ -67,6 +70,7 @@ fn authenticate<T>(policy: &Policy, request: &Request<T>) -> Result<Arc<Caller>,
 /// A missing caller means the service was mounted without the interceptor,
 /// which would silently serve every request unauthenticated. That is a wiring
 /// bug rather than a client error, so it fails closed and loudly.
+#[allow(clippy::result_large_err)]
 pub fn caller_of<T>(request: &Request<T>) -> Result<Arc<Caller>, Status> {
     request
         .extensions()
