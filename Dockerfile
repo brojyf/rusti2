@@ -1,14 +1,23 @@
+# syntax=docker/dockerfile:1.7
 FROM rust:1.97-bookworm AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssh-client protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY Cargo.toml Cargo.lock build.rs ./
-COPY proto ./proto
+COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 
-RUN cargo build --locked --release
+RUN --mount=type=secret,id=proto_ssh_key \
+    printf '%s\n' '[ssh.github.com]:443 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > /tmp/github-known-hosts \
+    && git config --global core.sshCommand "ssh -i /run/secrets/proto_ssh_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/tmp/github-known-hosts" \
+    && git config --global url."ssh://git@ssh.github.com:443/".insteadOf "https://github.com/" \
+    && cargo build --locked --release \
+    && git config --global --unset-all url."ssh://git@ssh.github.com:443/".insteadOf \
+    && git config --global --unset-all core.sshCommand \
+    && rm /tmp/github-known-hosts
 
 FROM debian:bookworm-slim AS runtime
 
