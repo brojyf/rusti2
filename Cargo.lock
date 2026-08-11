@@ -707,7 +707,7 @@ checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 [[package]]
 name = "cogate-cotab-proto"
 version = "0.1.0"
-source = "git+https://github.com/brojyf/cogate-cotab-proto?tag=v0.1.0#8c9a5975478d699f5bd99aa8380f5ac751b05a47"
+source = "git+https://github.com/brojyf/cogate-cotab-proto?tag=v0.1.1#271aa6878de1ab8abe7f2c9f6faa338e113fe796"
 dependencies = [
  "prost",
  "tonic",
@@ -2423,7 +2423,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
