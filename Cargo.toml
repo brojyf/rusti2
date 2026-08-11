@@ -9,7 +9,7 @@ tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"]
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic = "0.13"
 tonic-health = "0.13"
-cogate-cotab-proto = { git = "https://github.com/brojyf/cogate-cotab-proto", tag = "v0.1.0" }
+cogate-cotab-proto = { git = "https://github.com/brojyf/cogate-cotab-proto", tag = "v0.1.1" }
 aws-config = { version = "1", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1"
 aws-credential-types = "1"

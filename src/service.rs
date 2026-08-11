@@ -244,12 +244,18 @@ impl ObjectStorage for ObjectStorageService {
         }
 
         let size_bytes = buf.len() as i64;
-        let put = self
+        let mut put = self
             .s3
             .put_object()
             .bucket(&metadata.bucket)
             .key(&metadata.key)
-            .content_type(&metadata.content_type)
+            .content_type(&metadata.content_type);
+        // Sent only when the caller asked for one: an empty string here would
+        // overwrite the bucket default with a header that caches nothing.
+        if !metadata.cache_control.is_empty() {
+            put = put.cache_control(&metadata.cache_control);
+        }
+        let put = put
             .body(ByteStream::from(buf))
             .send()
             .await

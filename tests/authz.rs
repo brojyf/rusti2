@@ -189,6 +189,7 @@ async fn caller_authentication_and_authorization_are_enforced_end_to_end() {
                 bucket: "shared".into(),
                 key: "tenant-b/x".into(),
                 content_type: "image/jpeg".into(),
+                cache_control: String::new(),
             })),
         })
         .await
