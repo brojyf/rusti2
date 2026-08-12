@@ -25,7 +25,7 @@ but never presigns.
 | Component | Why |
 |---|---|
 | Cloudflare R2 | The object store this service fronts. |
-| `cogate-otel-collector` | Regular telemetry on 4317/4318. |
+| `cogate-otel-collector` | Regular telemetry on 8000/8001. |
 
 No PostgreSQL. No queues. It never calls the dead-letter pipeline — that is for
 queue consumers only.
