@@ -17,7 +17,7 @@ caller to another service's objects. The process refuses to start if
 `RUSTI2_CALLERS` is missing, malformed, or grants a caller nothing.
 
 Grant the narrowest set that still works. `cotab-api` hands out upload URLs and
-cleans up replaced objects but never moves bytes; `cogate-indexer` moves bytes
+cleans up replaced objects but never moves bytes; `indexer` moves bytes
 but never presigns.
 
 ## Dependencies
@@ -25,12 +25,12 @@ but never presigns.
 | Component | Why |
 |---|---|
 | Cloudflare R2 | The object store this service fronts. |
-| `cogate-otel-collector` | Logs and traces over OTLP HTTP on 18001. |
+| `otel-collector` | Logs and traces over OTLP HTTP on 18001. |
 
 No PostgreSQL. No queues. It never calls the dead-letter pipeline — that is for
 queue consumers only.
 
-Inbound: `cogate-cotab-api` and `cogate-indexer`.
+Inbound: `cotab-api` and `indexer`.
 
 ## Running locally
 
@@ -86,4 +86,4 @@ nothing useful against a single backend.
 
 See the root [`AGENTS.md`](../AGENTS.md). `src/auth.rs` and `src/policy.rs` are
 the reference implementation of the service-token pattern for the Rust
-services; `cogate-cotab-api/internal/grpcapi/auth.go` is the Go one.
+services; `cotab-api/internal/grpcapi/auth.go` is the Go one.
