@@ -15,6 +15,7 @@ use rusti2::auth::ServiceTokenAuth;
 use rusti2::config::Config;
 use rusti2::pb::object_storage_server::ObjectStorageServer;
 use rusti2::service::ObjectStorageService;
+use rusti2::telemetry;
 
 /// A [`Layer`] that intercepts `GET /api/health` and returns 200 OK.
 #[derive(Clone)]
@@ -67,11 +68,10 @@ where
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    let telemetry_shutdown = telemetry::setup(telemetry::Config {
+        service_name: std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "rusti2".into()),
+        endpoint: std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").unwrap_or_default(),
+    });
 
     let config = Config::from_env().map_err(std::io::Error::other)?;
     let addr = config.bind_addr.clone();
@@ -105,13 +105,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // interceptor.
     Server::builder()
         .layer(HealthLayer)
+        .layer(tower::util::MapResponseLayer::new(
+            |response: Response<_>| response.map(tonic::body::Body::new),
+        ))
+        .layer(
+            tower_http::trace::TraceLayer::new_for_grpc()
+                .make_span_with(telemetry::grpc_span)
+                .on_response(
+                    tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO),
+                )
+                .on_eos(tower_http::trace::DefaultOnEos::new().level(tracing::Level::INFO))
+                .on_failure(
+                    |failure: tower_http::classify::GrpcFailureClass,
+                     _: std::time::Duration,
+                     span: &tracing::Span| {
+                        span.record("otel.status_code", "ERROR");
+                        tracing::warn!(parent: span, error = %failure, "gRPC request failed");
+                    },
+                ),
+        )
         .add_service(health_service)
         .add_service(InterceptedService::new(
             ObjectStorageServer::new(ObjectStorageService::new(s3)),
             ServiceTokenAuth::new(config.policy.clone()),
         ))
-        .serve(addr.parse()?)
+        .serve_with_shutdown(addr.parse()?, shutdown_signal())
         .await?;
 
+    telemetry_shutdown.shutdown().await;
     Ok(())
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("install SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = terminate.recv() => {},
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = tokio::signal::ctrl_c().await;
 }

@@ -25,7 +25,7 @@ but never presigns.
 | Component | Why |
 |---|---|
 | Cloudflare R2 | The object store this service fronts. |
-| `cogate-otel-collector` | Regular telemetry on 8000/8001. |
+| `cogate-otel-collector` | Logs and traces over OTLP HTTP on 18001. |
 
 No PostgreSQL. No queues. It never calls the dead-letter pipeline — that is for
 queue consumers only.
@@ -52,6 +52,20 @@ requires `protoc` because the shared crate compiles its sources at build time.
 ```bash
 make test   # cargo test --all-targets, includes the proptest suite
 ```
+
+## Observability
+
+Set `OTEL_SERVICE_NAME=rusti2` and `OTEL_EXPORTER_OTLP_ENDPOINT` to the private
+Collector's HTTP receiver (`http://otel-collector:18001`, or its deployed
+network alias). Leave the endpoint empty to disable export locally. Grafana
+credentials belong only in the Collector environment.
+
+gRPC spans inherit inbound W3C `traceparent`, including streaming responses.
+RPC failures are marked as errors. Structured logs are exported alongside
+traces; the tracing layer records the RPC path without request headers or
+payloads. Exporter diagnostics remain local to avoid recursive exports.
+Exports are batched and best-effort. SIGTERM drains the server and flushes
+telemetry before exit.
 
 ## SLO
 
