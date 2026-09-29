@@ -297,7 +297,7 @@ mod tests {
                 "scopes": ["cotab-avatars-pending/*", "cotab-avatars/*"]
               }},
               {{
-                "name": "cogate-indexer",
+                "name": "indexer",
                 "token": "{INDEXER_TOKEN}",
                 "methods": ["Download", "Upload", "Delete"],
                 "scopes": ["cotab-avatars-pending/*", "cotab-avatars/*"]
