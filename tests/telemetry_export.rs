@@ -32,7 +32,7 @@ async fn exports_structured_logs_and_traces_on_shutdown() {
         endpoint: format!("http://{address}"),
     });
     let request = http::Request::builder()
-        .uri("/cogate.rusti2.v1.ObjectStorage/StatObject")
+        .uri("/rusti2.v1.ObjectStorage/StatObject")
         .header(
             "traceparent",
             "00-11111111111111111111111111111111-2222222222222222-01",

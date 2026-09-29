@@ -45,7 +45,7 @@ including the `RUSTI2_CALLERS` policy format, is documented in
 
 Port: `3002` (gRPC).
 
-The gRPC types come from the tagged `cogate-cotab-proto` dependency. This
+The gRPC types come from the tagged `cotab-proto` dependency. This
 repository does not keep a local `.proto` or generated-code copy. Building
 requires `protoc` because the shared crate compiles its sources at build time.
 
