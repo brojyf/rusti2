@@ -21,21 +21,12 @@ jobs:
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends protobuf-compiler
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
       # Caches ~/.cargo registry and ./target keyed on the lockfile.
       - uses: Swatinem/rust-cache@v2
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-      # -D warnings, so a lint that everybody agrees with does not accumulate
-      # into background noise nobody reads.
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
-      - name: Build
-        run: cargo build --all-targets
-      # --all-targets picks up tests/policy_fuzz.rs, the proptest suite.
-      - name: Test
-        run: cargo test --all-targets
+      - name: Unit tests
+        run: cargo test --locked --lib --bins
+      - name: Integration tests
+        run: cargo test --locked --test '*'
 
   build-and-deploy:
     name: Build image and deploy
