@@ -27,8 +27,7 @@ but never presigns.
 | Cloudflare R2 | The object store this service fronts. |
 | `otel-collector` | Logs and traces over OTLP HTTP on 18001. |
 
-No PostgreSQL. No queues. It never calls the dead-letter pipeline — that is for
-queue consumers only.
+No PostgreSQL. No queues.
 
 Inbound: `cotab-api` and `indexer`.
 
@@ -72,12 +71,9 @@ telemetry before exit.
 | SLI | Target |
 |---|---|
 | gRPC availability | 99.9% |
-| Unresolved archived failures across the platform (`ops.failed_messages where resolved_at is null`) | **always 0** |
 
-The first row is a **trend**: measured over a window, and a bad hour is a
-capacity conversation. The second is a platform-wide **incident** signal: one
-unresolved row means a real message could not be processed and is waiting for a
-human. There is no threshold to tune and no acceptable non-zero value.
+This is a **trend**: measured over a window, and a bad hour is a capacity
+conversation.
 
 Run 2 replicas: callers use `dns:///` targets with `round_robin`, which does
 nothing useful against a single backend.
