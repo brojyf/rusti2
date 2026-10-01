@@ -79,8 +79,10 @@ capacity conversation. The second is a platform-wide **incident** signal: one
 unresolved row means a real message could not be processed and is waiting for a
 human. There is no threshold to tune and no acceptable non-zero value.
 
-Run 2 replicas: callers use `dns:///` targets with `round_robin`, which does
-nothing useful against a single backend.
+Run 1 replica. Callers retry only `UNAVAILABLE`, for well under a second, so
+a restart fails `cotab-api` presign calls for its duration; `indexer` work is
+redelivered by the queue. Callers already dial `dns:///` targets with
+`round_robin`, so adding a replica later needs no client change.
 
 ## Conventions
 
