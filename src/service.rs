@@ -4,7 +4,7 @@ use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::primitives::ByteStream;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{error, info, warn};
+use tracing::{error, info, warn, Instrument};
 
 use crate::auth::caller_of;
 use crate::pb::object_storage_server::ObjectStorage;
@@ -169,7 +169,7 @@ impl ObjectStorage for ObjectStorageService {
             })?;
 
         let (tx, rx) = tokio::sync::mpsc::channel(4);
-        tokio::spawn(async move {
+        let body_reader = async move {
             let mut body = object.body;
             let mut pending: Vec<u8> = Vec::new();
             loop {
@@ -200,7 +200,8 @@ impl ObjectStorage for ObjectStorageService {
                     }
                 }
             }
-        });
+        };
+        tokio::spawn(body_reader.in_current_span());
 
         Ok(Response::new(ReceiverStream::new(rx)))
     }
