@@ -158,7 +158,8 @@ pub fn setup(cfg: Config) -> Shutdown {
     }
 }
 
-/// Owns the tracer provider and shuts it down on drop (or explicit call).
+/// Owns the tracer and logger providers. Dropping it is not guaranteed to
+/// flush; call [`Shutdown::shutdown`] before exiting.
 pub struct Shutdown {
     inner: Option<SdkTracerProvider>,
     logger_provider: Option<SdkLoggerProvider>,
