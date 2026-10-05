@@ -73,6 +73,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         endpoint: std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").unwrap_or_default(),
     });
 
+    // Startup failures (bad config, bind errors) go through tracing and get
+    // flushed like everything else; returned errors only reach stderr.
+    let result = run().await;
+    if let Err(err) = &result {
+        tracing::error!(error = %err, "rusti2 exited with an error");
+    }
+    telemetry_shutdown.shutdown().await;
+    result
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env().map_err(std::io::Error::other)?;
     let addr = config.bind_addr.clone();
 
@@ -132,7 +143,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .serve_with_shutdown(addr.parse()?, shutdown_signal())
         .await?;
 
-    telemetry_shutdown.shutdown().await;
     Ok(())
 }
 

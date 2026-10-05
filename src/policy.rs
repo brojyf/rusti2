@@ -425,4 +425,49 @@ mod tests {
             PolicyError::NoCallers
         ));
     }
+
+    #[test]
+    fn rejects_scopes_without_a_bucket() {
+        assert!(matches!(Scope::parse(""), Err(PolicyError::EmptyScope)));
+        assert!(matches!(
+            Scope::parse("/prefix"),
+            Err(PolicyError::EmptyScope)
+        ));
+    }
+
+    proptest::proptest! {
+        /// Scope parsing never panics, and a parsed scope always names a
+        /// bucket and stores a prefix with the cosmetic `*` already stripped.
+        #[test]
+        fn fuzz_scope_parse(raw in "\\PC*") {
+            if let Ok(scope) = Scope::parse(&raw) {
+                proptest::prop_assert!(!scope.bucket.is_empty());
+                proptest::prop_assert!(!scope.key_prefix.ends_with('*'));
+            }
+        }
+
+        /// A scope covers keys under its own prefix in its own bucket, and
+        /// nothing in another bucket.
+        #[test]
+        fn fuzz_scope_covers_consistency(
+            bucket in "[a-z][a-z0-9-]{0,20}",
+            prefix in "[a-z0-9/]{0,30}",
+            suffix in "[a-z0-9.]{0,30}"
+        ) {
+            let scope = Scope::parse(&format!("{bucket}/{prefix}*")).expect("valid scope must parse");
+            let key = format!("{prefix}{suffix}");
+
+            proptest::prop_assert!(scope.covers(&bucket, &key));
+            let other_bucket = format!("other-{bucket}");
+            proptest::prop_assert!(!scope.covers(&other_bucket, &key));
+
+            // Prepending "x" only guarantees a non-matching key when the result
+            // doesn't coincidentally start with `prefix` again (e.g. prefix "x"
+            // turns "x{prefix}" back into a prefix match).
+            let foreign_key = format!("x{prefix}{suffix}");
+            if !prefix.is_empty() && !foreign_key.starts_with(&prefix) {
+                proptest::prop_assert!(!scope.covers(&bucket, &foreign_key));
+            }
+        }
+    }
 }
