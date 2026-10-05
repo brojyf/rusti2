@@ -161,4 +161,38 @@ mod tests {
         let status = caller_of(&Request::new(())).expect_err("must fail closed");
         assert_eq!(status.code(), tonic::Code::Internal);
     }
+
+    #[test]
+    fn rejects_a_bearer_scheme_with_no_token() {
+        let status =
+            authenticate(&policy(), &request_with(Some("Bearer "))).expect_err("must reject");
+        assert_eq!(status.message(), INVALID_SERVICE_TOKEN);
+    }
+
+    proptest::proptest! {
+        /// Any header value that metadata can carry either resolves to the
+        /// configured caller, because it is exactly the bearer scheme plus the
+        /// token, or fails with the shared message. Never a panic.
+        #[test]
+        fn fuzz_authenticate(header in "[ -~]*") {
+            let mut request = Request::new(());
+            match header.parse() {
+                Ok(value) => {
+                    request.metadata_mut().insert("authorization", value);
+                }
+                Err(_) => return Ok(()),
+            }
+            match authenticate(&policy(), &request) {
+                Ok(caller) => {
+                    proptest::prop_assert_eq!(caller.name.as_str(), "cotab-api");
+                    let token = header
+                        .strip_prefix("Bearer ")
+                        .or_else(|| header.strip_prefix("bearer "))
+                        .map(str::trim);
+                    proptest::prop_assert_eq!(token, Some(TOKEN));
+                }
+                Err(status) => proptest::prop_assert_eq!(status.message(), INVALID_SERVICE_TOKEN),
+            }
+        }
+    }
 }
