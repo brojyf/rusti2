@@ -2,6 +2,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::primitives::ByteStream;
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{error, info, warn, Instrument};
@@ -71,6 +72,46 @@ fn authorize(caller: &Caller, method: Method, bucket: &str, key: &str) -> Result
 fn internal(op: &str, err: impl std::fmt::Debug) -> Status {
     error!(op, ?err, "r2 operation failed");
     Status::internal(format!("{op} failed"))
+}
+
+/// Streams `body` to `tx` in `CHUNK_BYTES` chunks until R2 reaches EOF, R2
+/// fails, or the client goes away.
+async fn forward_body(mut body: ByteStream, tx: mpsc::Sender<Result<DownloadObjectChunk, Status>>) {
+    let mut pending: Vec<u8> = Vec::new();
+    loop {
+        // Waiting on the client too: a slow R2 body can take far longer than
+        // one chunk to fill, and the connection must not outlive the download.
+        let next = tokio::select! {
+            next = body.try_next() => next,
+            () = tx.closed() => return, // client went away
+        };
+        match next {
+            Ok(Some(bytes)) => {
+                pending.extend_from_slice(&bytes);
+                while pending.len() >= CHUNK_BYTES {
+                    let rest = pending.split_off(CHUNK_BYTES);
+                    let chunk = std::mem::replace(&mut pending, rest);
+                    if tx
+                        .send(Ok(DownloadObjectChunk { body: chunk }))
+                        .await
+                        .is_err()
+                    {
+                        return; // client went away
+                    }
+                }
+            }
+            Ok(None) => {
+                if !pending.is_empty() {
+                    let _ = tx.send(Ok(DownloadObjectChunk { body: pending })).await;
+                }
+                return;
+            }
+            Err(e) => {
+                let _ = tx.send(Err(internal("download_object", e))).await;
+                return;
+            }
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -169,39 +210,7 @@ impl ObjectStorage for ObjectStorageService {
             })?;
 
         let (tx, rx) = tokio::sync::mpsc::channel(4);
-        let body_reader = async move {
-            let mut body = object.body;
-            let mut pending: Vec<u8> = Vec::new();
-            loop {
-                match body.try_next().await {
-                    Ok(Some(bytes)) => {
-                        pending.extend_from_slice(&bytes);
-                        while pending.len() >= CHUNK_BYTES {
-                            let rest = pending.split_off(CHUNK_BYTES);
-                            let chunk = std::mem::replace(&mut pending, rest);
-                            if tx
-                                .send(Ok(DownloadObjectChunk { body: chunk }))
-                                .await
-                                .is_err()
-                            {
-                                return; // client went away
-                            }
-                        }
-                    }
-                    Ok(None) => {
-                        if !pending.is_empty() {
-                            let _ = tx.send(Ok(DownloadObjectChunk { body: pending })).await;
-                        }
-                        return;
-                    }
-                    Err(e) => {
-                        let _ = tx.send(Err(internal("download_object", e))).await;
-                        return;
-                    }
-                }
-            }
-        };
-        tokio::spawn(body_reader.in_current_span());
+        tokio::spawn(forward_body(object.body, tx).in_current_span());
 
         Ok(Response::new(ReceiverStream::new(rx)))
     }
@@ -289,5 +298,90 @@ impl ObjectStorage for ObjectStorageService {
             .map_err(|e| internal("delete_object", e))?;
 
         Ok(Response::new(DeleteObjectResponse {}))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+    use http_body_util::channel::{Channel, Sender as BodySender};
+
+    /// An R2 body whose bytes and end are driven by the test.
+    fn r2_body() -> (BodySender<Bytes, std::io::Error>, ByteStream) {
+        let (sender, body) = Channel::<Bytes, std::io::Error>::new(1);
+        (sender, ByteStream::from_body_1_x(body))
+    }
+
+    async fn collect(
+        mut rx: mpsc::Receiver<Result<DownloadObjectChunk, Status>>,
+    ) -> Vec<Result<DownloadObjectChunk, Status>> {
+        let mut out = Vec::new();
+        while let Some(item) = rx.recv().await {
+            out.push(item);
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn cancelled_download_stops_reading_a_slow_body() {
+        let (mut r2, body) = r2_body();
+        let (tx, rx) = mpsc::channel(4);
+        let reader = tokio::spawn(forward_body(body, tx));
+
+        // A small piece that never fills a chunk, so the reader never sends.
+        r2.send_data(Bytes::from_static(b"x")).await.unwrap();
+        drop(rx);
+
+        tokio::time::timeout(Duration::from_secs(5), reader)
+            .await
+            .expect("reader kept waiting on R2 after the client went away")
+            .unwrap();
+        assert!(
+            r2.send_data(Bytes::from_static(b"x")).await.is_err(),
+            "the R2 body was not released"
+        );
+    }
+
+    #[tokio::test]
+    async fn body_is_forwarded_in_whole_chunks_then_the_remainder() {
+        let (mut r2, body) = r2_body();
+        let (tx, rx) = mpsc::channel(4);
+        let reader = tokio::spawn(forward_body(body, tx));
+
+        r2.send_data(Bytes::from(vec![1u8; CHUNK_BYTES - 1]))
+            .await
+            .unwrap();
+        r2.send_data(Bytes::from(vec![2u8; 11])).await.unwrap();
+        drop(r2); // EOF
+
+        let chunks: Vec<Vec<u8>> = collect(rx)
+            .await
+            .into_iter()
+            .map(|c| c.unwrap().body)
+            .collect();
+        reader.await.unwrap();
+
+        let mut first = vec![1u8; CHUNK_BYTES - 1];
+        first.push(2);
+        assert_eq!(chunks, vec![first, vec![2u8; 10]]);
+    }
+
+    #[tokio::test]
+    async fn r2_error_is_reported_as_internal() {
+        let (mut r2, body) = r2_body();
+        let (tx, rx) = mpsc::channel(4);
+        let reader = tokio::spawn(forward_body(body, tx));
+
+        r2.send_data(Bytes::from_static(b"partial")).await.unwrap();
+        r2.abort(std::io::Error::other("connection reset"));
+
+        let items = collect(rx).await;
+        reader.await.unwrap();
+
+        assert_eq!(items.len(), 1);
+        let status = items.into_iter().next().unwrap().unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Internal);
+        assert_eq!(status.message(), "download_object failed");
     }
 }

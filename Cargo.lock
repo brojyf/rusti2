@@ -1301,6 +1301,7 @@ dependencies = [
  "http 1.5.0",
  "http-body 1.1.0",
  "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]
@@ -2386,8 +2387,10 @@ dependencies = [
  "aws-credential-types",
  "aws-sdk-s3",
  "axum",
+ "bytes",
  "cotab-proto",
  "http 1.5.0",
+ "http-body-util",
  "opentelemetry",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
